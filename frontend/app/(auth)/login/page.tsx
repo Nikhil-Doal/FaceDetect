@@ -36,7 +36,7 @@ export default function Login() {
         localStorage.setItem("username", data.username);
         
         // Redirect to dashboard or home
-        router.push("/");
+        router.push("/home");
       } else {
         setError(data.error || "Login failed");
       }
