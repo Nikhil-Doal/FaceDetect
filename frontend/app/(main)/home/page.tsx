@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 interface Face {
   bbox: [number, number, number, number];
@@ -9,24 +11,59 @@ interface Face {
   confidence: number;
 }
 
+interface TrackedFace {
+  id: string;
+  bbox: [number, number, number, number];
+  name: string;
+  relation?: string;
+  confidence: number;
+  lastSeen: number;
+  smoothedBbox: [number, number, number, number];
+}
+
 const WIDTH = 640;
 const HEIGHT = 480;
 
-export default function WebcamPage() {
+// Smoothing parameters - adjust these for different effects
+const SMOOTHING_FACTOR = 0.3; // Lower = smoother (0.1-0.5)
+const TRACKING_THRESHOLD = 80; // Distance to match same face
+const FACE_TIMEOUT = 1000; // Keep face for 1 second after lost
+const MIN_CONFIDENCE_CHANGE = 0.05; // Prevent constant name switching
+
+export default function HomePage() {
+  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [faces, setFaces] = useState<Face[]>([]);
+  const [faces, setFaces] = useState<TrackedFace[]>([]);
+  const trackedFacesRef = useRef<Map<string, TrackedFace>>(new Map());
   const [isConnected, setIsConnected] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
+  const [username, setUsername] = useState<string>("");
+  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Start webcam
+  useEffect(() => {
+    const storedUsername = localStorage.getItem("username");
+    const storedToken = localStorage.getItem("token");
+    
+    if (!storedToken) {
+      router.push("/login");
+      return;
+    }
+    
+    if (storedUsername) {
+      setUsername(storedUsername);
+    }
+  }, [router]);
+
   useEffect(() => {
     let stream: MediaStream;
 
     navigator.mediaDevices
-      .getUserMedia({ video: { width: WIDTH, height: HEIGHT } })
+      .getUserMedia({ 
+        video: { width: WIDTH, height: HEIGHT, frameRate: { ideal: 30 } } 
+      })
       .then((s) => {
         stream = s;
         if (videoRef.current) {
@@ -35,8 +72,8 @@ export default function WebcamPage() {
         }
       })
       .catch((err) => {
-        setError("Camera access denied. Please allow camera permissions.");
-        console.error(err);
+        setError("Camera access denied");
+        console.error("Camera error:", err);
       });
 
     return () => {
@@ -44,340 +81,311 @@ export default function WebcamPage() {
     };
   }, []);
 
-  // Capture + recognize
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      if (!video || !canvas || video.videoWidth === 0) return;
-
-      canvas.width = WIDTH;
-      canvas.height = HEIGHT;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      ctx.drawImage(video, 0, 0, WIDTH, HEIGHT);
-      const image = canvas.toDataURL("image/jpeg", 0.6);
-
-      setIsScanning(true);
-
-      try {
-        const token = localStorage.getItem("token");
-        
-        const res = await fetch("http://localhost:5000/api/recognize", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token && { Authorization: `Bearer ${token}` }),
-          },
-          body: JSON.stringify({ image }),
-        });
-
-        if (!res.ok) {
-          if (res.status === 401) {
-            setError("Authentication required. Please log in.");
-          }
-          throw new Error(`HTTP ${res.status}`);
-        }
-
-        const data = await res.json();
-        setFaces(Array.isArray(data) ? data : []);
-        setLastScanTime(new Date());
-        setError(null);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsScanning(false);
-      }
-    }, 200);
-
-    return () => clearInterval(interval);
+  const calculateDistance = useCallback((bbox1: number[], bbox2: number[]) => {
+    const center1X = (bbox1[0] + bbox1[2]) / 2;
+    const center1Y = (bbox1[1] + bbox1[3]) / 2;
+    const center2X = (bbox2[0] + bbox2[2]) / 2;
+    const center2Y = (bbox2[1] + bbox2[3]) / 2;
+    return Math.sqrt(Math.pow(center1X - center2X, 2) + Math.pow(center1Y - center2Y, 2));
   }, []);
 
+  const smoothBbox = useCallback((
+    current: [number, number, number, number],
+    target: [number, number, number, number],
+    factor: number
+  ): [number, number, number, number] => {
+    return [
+      current[0] + (target[0] - current[0]) * factor,
+      current[1] + (target[1] - current[1]) * factor,
+      current[2] + (target[2] - current[2]) * factor,
+      current[3] + (target[3] - current[3]) * factor,
+    ];
+  }, []);
+
+  const trackFaces = useCallback((newFaces: Face[]) => {
+    const now = Date.now();
+    const updatedTracked = new Map(trackedFacesRef.current);
+    const matched = new Set<string>();
+    
+    for (const newFace of newFaces) {
+      let bestMatch: { id: string; distance: number } | null = null;
+
+      for (const [id, tracked] of updatedTracked.entries()) {
+        if (matched.has(id)) continue;
+        const distance = calculateDistance(newFace.bbox, tracked.bbox);
+        if (distance < TRACKING_THRESHOLD && (!bestMatch || distance < bestMatch.distance)) {
+          bestMatch = { id, distance };
+        }
+      }
+
+      if (bestMatch) {
+        const existing = updatedTracked.get(bestMatch.id)!;
+        const smoothedBbox = smoothBbox(existing.smoothedBbox, newFace.bbox, SMOOTHING_FACTOR);
+        const shouldUpdateIdentity = 
+          newFace.name !== existing.name ||
+          Math.abs(newFace.confidence - existing.confidence) > MIN_CONFIDENCE_CHANGE;
+
+        updatedTracked.set(bestMatch.id, {
+          ...existing,
+          bbox: newFace.bbox,
+          smoothedBbox,
+          name: shouldUpdateIdentity ? newFace.name : existing.name,
+          relation: shouldUpdateIdentity ? newFace.relation : existing.relation,
+          confidence: shouldUpdateIdentity 
+            ? newFace.confidence 
+            : existing.confidence + (newFace.confidence - existing.confidence) * 0.2,
+          lastSeen: now,
+        });
+        matched.add(bestMatch.id);
+      } else {
+        const newId = `face_${now}_${Math.random().toString(36).substr(2, 9)}`;
+        updatedTracked.set(newId, {
+          id: newId,
+          bbox: newFace.bbox,
+          smoothedBbox: newFace.bbox,
+          name: newFace.name,
+          relation: newFace.relation,
+          confidence: newFace.confidence,
+          lastSeen: now,
+        });
+      }
+    }
+
+    for (const [id, tracked] of updatedTracked.entries()) {
+      if (now - tracked.lastSeen > FACE_TIMEOUT) {
+        updatedTracked.delete(id);
+      }
+    }
+
+    trackedFacesRef.current = updatedTracked;
+    setFaces(Array.from(updatedTracked.values()));
+  }, [calculateDistance, smoothBbox]);
+
+  const scanFaces = useCallback(async () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || video.videoWidth === 0 || isScanning) return;
+
+    canvas.width = WIDTH;
+    canvas.height = HEIGHT;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.drawImage(video, 0, 0, WIDTH, HEIGHT);
+    const image = canvas.toDataURL("image/jpeg", 0.5);
+    setIsScanning(true);
+
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        router.push("/login");
+        return;
+      }
+
+      const res = await fetch("http://localhost:5000/api/recognize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({ image }),
+      });
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          localStorage.clear();
+          router.push("/login");
+          return;
+        }
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        trackFaces(data);
+      }
+      setLastScanTime(new Date());
+      setError(null);
+    } catch (err) {
+      console.error("Recognition error:", err);
+    } finally {
+      setIsScanning(false);
+    }
+  }, [isScanning, router, trackFaces]);
+
+  useEffect(() => {
+    if (isConnected) {
+      scanIntervalRef.current = setInterval(scanFaces, 600);
+    }
+    return () => {
+      if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
+    };
+  }, [isConnected, scanFaces]);
+
+  const handleLogout = () => {
+    localStorage.clear();
+    router.push("/");
+  };
+
   const getConfidenceColor = useCallback((confidence: number) => {
-    if (confidence >= 0.7) return { border: "#00ff88", bg: "rgba(0, 255, 136, 0.1)", text: "#00ff88" };
-    if (confidence >= 0.5) return { border: "#00d4ff", bg: "rgba(0, 212, 255, 0.1)", text: "#00d4ff" };
-    if (confidence >= 0.3) return { border: "#ffa500", bg: "rgba(255, 165, 0, 0.1)", text: "#ffa500" };
-    return { border: "#ff4757", bg: "rgba(255, 71, 87, 0.1)", text: "#ff4757" };
+    if (confidence >= 0.7) return "#00ff88";
+    if (confidence >= 0.5) return "#00d4ff";
+    if (confidence >= 0.3) return "#ffa500";
+    return "#ff4757";
   }, []);
 
   const knownFaces = faces.filter((f) => f.name !== "Unknown");
   const unknownFaces = faces.filter((f) => f.name === "Unknown");
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center p-6 font-sans">
-      {/* Animated background grid */}
-      <div 
-        className="fixed inset-0 opacity-10 pointer-events-none"
-        style={{
-          backgroundImage: `
-            linear-gradient(rgba(0, 212, 255, 0.3) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0, 212, 255, 0.3) 1px, transparent 1px)
-          `,
-          backgroundSize: '50px 50px',
-        }}
-      />
+    <div className="min-h-screen h-screen flex flex-col p-6 overflow-hidden">
+      <nav className="flex justify-between items-center mb-6 flex-shrink-0">
+        <div>
+          <h1 className="font-serif text-4xl tracking-tight text-white">FaceID System</h1>
+          <p className="text-white/60 text-sm mt-1">
+            Welcome, <span className="text-green-400">{username}</span>
+          </p>
+        </div>
+        <div className="flex gap-4">
+          <Link href="/add" className="rounded-full px-6 py-2 bg-white text-black hover:bg-white/80 transition font-medium font-serif">
+            + Add Person
+          </Link>
+          <button onClick={handleLogout} className="rounded-full px-6 py-2 text-white border border-white/30 hover:bg-white/10 transition font-serif">
+            Logout
+          </button>
+        </div>
+      </nav>
 
-      {/* Header */}
-      <div className="relative z-10 mb-8 text-center">
-        <h1 
-          className="text-4xl font-bold tracking-wider mb-2"
-          style={{
-            background: "linear-gradient(135deg, #00d4ff 0%, #00ff88 50%, #00d4ff 100%)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            textShadow: "0 0 40px rgba(0, 212, 255, 0.5)",
-          }}
-        >
-          FACIAL RECOGNITION
-        </h1>
-        <p className="text-slate-400 text-sm tracking-widest uppercase">
-          Real-time Identity Scanner
-        </p>
-      </div>
-
-      {/* Main container */}
-      <div className="relative z-10 flex gap-6 items-start">
-        {/* Video feed container */}
-        <div className="relative">
-          {/* Outer glow frame */}
-          <div 
-            className="absolute -inset-1 rounded-lg opacity-75 blur-sm"
-            style={{
-              background: isScanning 
-                ? "linear-gradient(135deg, #00d4ff, #00ff88, #00d4ff)" 
-                : "linear-gradient(135deg, #1e293b, #334155)",
-              animation: isScanning ? "pulse 1s ease-in-out infinite" : "none",
-            }}
-          />
-          
-          {/* Video wrapper */}
-          <div 
-            className="relative bg-slate-900 rounded-lg overflow-hidden"
-            style={{ 
-              width: WIDTH, 
-              height: HEIGHT,
-              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255,255,255,0.1)",
-            }}
-          >
-            {/* Corner decorations */}
-            <div className="absolute top-0 left-0 w-8 h-8 border-l-2 border-t-2 border-cyan-400 rounded-tl-lg" />
-            <div className="absolute top-0 right-0 w-8 h-8 border-r-2 border-t-2 border-cyan-400 rounded-tr-lg" />
-            <div className="absolute bottom-0 left-0 w-8 h-8 border-l-2 border-b-2 border-cyan-400 rounded-bl-lg" />
-            <div className="absolute bottom-0 right-0 w-8 h-8 border-r-2 border-b-2 border-cyan-400 rounded-br-lg" />
-
-            {/* Video element */}
-            <video
-              ref={videoRef}
-              autoPlay
-              muted
-              playsInline
-              className="w-full h-full object-cover"
-            />
-
+      <div className="flex gap-6 flex-1 min-h-0">
+        <div className="flex-1 relative min-h-0">
+          <div className="relative h-full rounded-2xl overflow-hidden border border-white/30 bg-black/50 backdrop-blur-sm">
+            <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-contain" />
             <canvas ref={canvasRef} className="hidden" />
 
-            {/* Scanning line effect */}
             {isScanning && (
-              <div 
-                className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent pointer-events-none"
-                style={{
-                  animation: "scanLine 2s ease-in-out infinite",
-                  boxShadow: "0 0 20px 5px rgba(0, 212, 255, 0.5)",
-                }}
-              />
+              <div className="absolute top-4 left-4 flex items-center gap-2 bg-green-400/20 border border-green-400/50 rounded-full px-3 py-1">
+                <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                <span className="text-green-400 text-xs font-bold">SCANNING</span>
+              </div>
             )}
 
-            {/* Face bounding boxes */}
-            {faces.map((f, i) => {
-              const [x1, y1, x2, y2] = f.bbox;
-              const colors = getConfidenceColor(f.confidence);
-              const isKnown = f.name !== "Unknown";
+            <div className="absolute inset-0">
+              {faces.map((f) => {
+                const [x1, y1, x2, y2] = f.smoothedBbox;
+                const color = getConfidenceColor(f.confidence);
+                const isKnown = f.name !== "Unknown";
+                const videoElement = videoRef.current;
+                if (!videoElement) return null;
 
-              return (
-                <div
-                  key={i}
-                  className="absolute pointer-events-none transition-all duration-200"
-                  style={{
-                    left: x1,
-                    top: y1,
-                    width: x2 - x1,
-                    height: y2 - y1,
-                  }}
-                >
-                  {/* Bounding box */}
-                  <div 
-                    className="absolute inset-0 rounded"
+                const videoWidth = videoElement.offsetWidth;
+                const videoHeight = videoElement.offsetHeight;
+                const scaleX = videoWidth / WIDTH;
+                const scaleY = videoHeight / HEIGHT;
+
+                return (
+                  <div
+                    key={f.id}
+                    className="absolute pointer-events-none"
                     style={{
-                      border: `2px solid ${colors.border}`,
-                      backgroundColor: colors.bg,
-                      boxShadow: `0 0 15px ${colors.border}40, inset 0 0 15px ${colors.border}20`,
+                      left: x1 * scaleX,
+                      top: y1 * scaleY,
+                      width: (x2 - x1) * scaleX,
+                      height: (y2 - y1) * scaleY,
+                      transition: 'all 0.15s ease-out',
                     }}
-                  />
-
-                  {/* Corner brackets */}
-                  <div className="absolute -top-1 -left-1 w-3 h-3 border-l-2 border-t-2" style={{ borderColor: colors.border }} />
-                  <div className="absolute -top-1 -right-1 w-3 h-3 border-r-2 border-t-2" style={{ borderColor: colors.border }} />
-                  <div className="absolute -bottom-1 -left-1 w-3 h-3 border-l-2 border-b-2" style={{ borderColor: colors.border }} />
-                  <div className="absolute -bottom-1 -right-1 w-3 h-3 border-r-2 border-b-2" style={{ borderColor: colors.border }} />
-
-                  {/* Label */}
-                  <div 
-                    className="absolute -top-10 left-0 right-0 flex flex-col items-center"
                   >
-                    <div 
-                      className="px-3 py-1.5 rounded-md text-xs font-bold tracking-wider whitespace-nowrap backdrop-blur-sm"
-                      style={{
-                        backgroundColor: `${colors.border}20`,
-                        border: `1px solid ${colors.border}60`,
-                        color: colors.text,
-                        boxShadow: `0 4px 15px ${colors.border}30`,
-                      }}
-                    >
-                      {isKnown ? (
-                        <span className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: colors.border }} />
-                          {f.name.toUpperCase()}
-                          {f.relation && (
-                            <span className="opacity-70">• {f.relation}</span>
-                          )}
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                          UNKNOWN
-                        </span>
-                      )}
-                    </div>
-                    <div 
-                      className="mt-1 px-2 py-0.5 rounded text-[10px] font-mono"
-                      style={{ 
-                        color: colors.text,
-                        backgroundColor: "rgba(0,0,0,0.5)",
-                      }}
-                    >
-                      {(f.confidence * 100).toFixed(1)}% MATCH
+                    <div className="absolute inset-0 rounded" style={{
+                      border: `3px solid ${color}`,
+                      boxShadow: `0 0 20px ${color}60, inset 0 0 20px ${color}20`,
+                    }} />
+                    <div className="absolute -top-1 -left-1 w-4 h-4" style={{ borderLeft: `3px solid ${color}`, borderTop: `3px solid ${color}` }} />
+                    <div className="absolute -top-1 -right-1 w-4 h-4" style={{ borderRight: `3px solid ${color}`, borderTop: `3px solid ${color}` }} />
+                    <div className="absolute -bottom-1 -left-1 w-4 h-4" style={{ borderLeft: `3px solid ${color}`, borderBottom: `3px solid ${color}` }} />
+                    <div className="absolute -bottom-1 -right-1 w-4 h-4" style={{ borderRight: `3px solid ${color}`, borderBottom: `3px solid ${color}` }} />
+
+                    <div className="absolute -top-14 left-0 right-0 flex flex-col items-center gap-1">
+                      <div className="px-4 py-2 rounded-full text-sm font-bold tracking-wider whitespace-nowrap backdrop-blur-md" style={{
+                        backgroundColor: `${color}30`,
+                        border: `2px solid ${color}`,
+                        color: isKnown ? "#fff" : "#ff4757",
+                      }}>
+                        {isKnown ? (
+                          <span className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: color }} />
+                            {f.name.toUpperCase()}
+                            {f.relation && <span className="opacity-70">• {f.relation}</span>}
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                            UNKNOWN
+                          </span>
+                        )}
+                      </div>
+                      <div className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-black/70" style={{ color }}>
+                        {(f.confidence * 100).toFixed(1)}%
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
 
-            {/* Status overlay */}
             <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
-              <div className="flex items-center justify-between text-xs">
+              <div className="flex items-center justify-between text-xs text-white/60">
                 <div className="flex items-center gap-2">
-                  <span 
-                    className="w-2 h-2 rounded-full animate-pulse"
-                    style={{ backgroundColor: isConnected ? "#00ff88" : "#ff4757" }}
-                  />
-                  <span className="text-slate-400 font-mono">
-                    {isConnected ? "CAMERA ACTIVE" : "NO SIGNAL"}
-                  </span>
+                  <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'} animate-pulse`} />
+                  <span className="font-mono">{isConnected ? "CONNECTED" : "DISCONNECTED"}</span>
                 </div>
-                <span className="text-slate-500 font-mono">
-                  {WIDTH}×{HEIGHT} @ 5 FPS
-                </span>
+                <span className="font-mono">TRACKING: {faces.length} • SMOOTH</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Info panel */}
-        <div 
-          className="w-72 rounded-lg overflow-hidden"
-          style={{
-            backgroundColor: "rgba(15, 23, 42, 0.8)",
-            border: "1px solid rgba(0, 212, 255, 0.2)",
-            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
-          }}
-        >
-          {/* Panel header */}
-          <div 
-            className="p-4 border-b"
-            style={{ 
-              borderColor: "rgba(0, 212, 255, 0.2)",
-              background: "linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, transparent 100%)",
-            }}
-          >
-            <h2 className="text-cyan-400 font-bold tracking-wider text-sm">
-              DETECTION LOG
-            </h2>
-            <p className="text-slate-500 text-xs mt-1 font-mono">
-              {lastScanTime 
-                ? `Last scan: ${lastScanTime.toLocaleTimeString()}`
-                : "Awaiting scan..."
-              }
-            </p>
-          </div>
+        <div className="w-80 glass rounded-2xl bg-white/10 border border-white/30 p-6 flex flex-col">
+          <h2 className="text-white font-serif text-2xl mb-4">Detection Stats</h2>
+          {lastScanTime && (
+            <p className="text-white/60 text-xs mb-6 font-mono">Last scan: {lastScanTime.toLocaleTimeString()}</p>
+          )}
 
-          {/* Stats */}
-          <div className="p-4 border-b" style={{ borderColor: "rgba(0, 212, 255, 0.1)" }}>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-800/50 rounded-lg p-3 text-center">
-                <div className="text-2xl font-bold text-emerald-400">{knownFaces.length}</div>
-                <div className="text-[10px] text-slate-500 tracking-wider mt-1">IDENTIFIED</div>
-              </div>
-              <div className="bg-slate-800/50 rounded-lg p-3 text-center">
-                <div className="text-2xl font-bold text-red-400">{unknownFaces.length}</div>
-                <div className="text-[10px] text-slate-500 tracking-wider mt-1">UNKNOWN</div>
-              </div>
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="bg-white/5 rounded-xl p-4 text-center border border-white/20">
+              <div className="text-3xl font-bold text-green-400">{knownFaces.length}</div>
+              <div className="text-xs text-white/60 mt-1 tracking-wider">KNOWN</div>
+            </div>
+            <div className="bg-white/5 rounded-xl p-4 text-center border border-white/20">
+              <div className="text-3xl font-bold text-red-400">{unknownFaces.length}</div>
+              <div className="text-xs text-white/60 mt-1 tracking-wider">UNKNOWN</div>
             </div>
           </div>
 
-          {/* Face list */}
-          <div className="p-4 max-h-64 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto">
             {faces.length === 0 ? (
-              <div className="text-center py-8">
-                <div className="text-slate-600 text-4xl mb-3">👤</div>
-                <p className="text-slate-500 text-sm">No faces detected</p>
-                <p className="text-slate-600 text-xs mt-1">Position yourself in frame</p>
+              <div className="text-center py-12">
+                <div className="text-white/30 text-5xl mb-3">👤</div>
+                <p className="text-white/60 text-sm">No faces detected</p>
               </div>
             ) : (
               <div className="space-y-3">
-                {faces.map((f, i) => {
-                  const colors = getConfidenceColor(f.confidence);
+                {faces.map((f) => {
+                  const color = getConfidenceColor(f.confidence);
                   return (
-                    <div 
-                      key={i}
-                      className="rounded-lg p-3 transition-all duration-200 hover:scale-[1.02]"
-                      style={{
-                        backgroundColor: colors.bg,
-                        border: `1px solid ${colors.border}40`,
-                      }}
-                    >
-                      <div className="flex items-center justify-between">
+                    <div key={f.id} className="rounded-xl p-4 border bg-white/5 hover:bg-white/10 transition-all" style={{ borderColor: `${color}40` }}>
+                      <div className="flex items-center justify-between mb-2">
                         <div>
-                          <div className="font-bold text-sm" style={{ color: colors.text }}>
-                            {f.name}
-                          </div>
-                          {f.relation && (
-                            <div className="text-slate-400 text-xs mt-0.5">
-                              {f.relation}
-                            </div>
-                          )}
+                          <div className="font-bold text-white">{f.name}</div>
+                          {f.relation && <div className="text-white/60 text-xs mt-1">{f.relation}</div>}
                         </div>
-                        <div 
-                          className="text-xs font-mono px-2 py-1 rounded"
-                          style={{ 
-                            backgroundColor: `${colors.border}20`,
-                            color: colors.text,
-                          }}
-                        >
+                        <div className="text-xs font-mono px-2 py-1 rounded font-bold" style={{ backgroundColor: `${color}20`, color }}>
                           {(f.confidence * 100).toFixed(0)}%
                         </div>
                       </div>
-                      {/* Confidence bar */}
-                      <div className="mt-2 h-1 bg-slate-700 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{
-                            width: `${f.confidence * 100}%`,
-                            backgroundColor: colors.border,
-                            boxShadow: `0 0 10px ${colors.border}`,
-                          }}
-                        />
+                      <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all duration-500" style={{
+                          width: `${f.confidence * 100}%`,
+                          backgroundColor: color,
+                        }} />
                       </div>
                     </div>
                   );
@@ -386,38 +394,13 @@ export default function WebcamPage() {
             )}
           </div>
 
-          {/* Error display */}
           {error && (
-            <div className="p-4 border-t" style={{ borderColor: "rgba(255, 71, 87, 0.3)" }}>
-              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-                <p className="text-red-400 text-xs">{error}</p>
-              </div>
+            <div className="mt-4 bg-red-500/20 border border-red-500/50 rounded-xl p-3">
+              <p className="text-red-400 text-xs">{error}</p>
             </div>
           )}
         </div>
       </div>
-
-      {/* Footer */}
-      <div className="relative z-10 mt-8 text-center">
-        <p className="text-slate-600 text-xs tracking-widest">
-          POWERED BY INSIGHTFACE • BUFFALO_L MODEL
-        </p>
-      </div>
-
-      {/* Global styles */}
-      <style jsx global>{`
-        @keyframes scanLine {
-          0%, 100% { top: 0; opacity: 0; }
-          10% { opacity: 1; }
-          90% { opacity: 1; }
-          100% { top: 100%; opacity: 0; }
-        }
-        
-        @keyframes pulse {
-          0%, 100% { opacity: 0.75; }
-          50% { opacity: 1; }
-        }
-      `}</style>
     </div>
   );
 }

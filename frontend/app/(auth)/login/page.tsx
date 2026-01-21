@@ -31,12 +31,19 @@ export default function Login() {
       const data = await response.json();
 
       if (response.ok) {
-        // Store token
+        // Store token and username
         localStorage.setItem("token", data.token);
         localStorage.setItem("username", data.username);
         
-        // Redirect to dashboard or home
-        router.push("/home");
+        console.log("Login successful, token saved");
+        console.log("Has acquaintances:", data.hasAcquaintances);
+        
+        // Redirect based on whether user has added people
+        if (data.hasAcquaintances) {
+          router.push("/home");
+        } else {
+          router.push("/add");
+        }
       } else {
         setError(data.error || "Login failed");
       }

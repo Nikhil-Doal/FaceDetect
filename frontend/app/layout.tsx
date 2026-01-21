@@ -36,7 +36,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} antialiased`}
       >
-        <SilkBackground />
+        <SilkBackground color="#9f0000"></SilkBackground>
         {children}
       </body>
     </html>

@@ -2,14 +2,18 @@
 
 import Silk from "@/components/Silk";
 
-export default function SilkBackground() {
+interface SilkBackgroundProps {
+  color?: string;
+}
+
+export default function SilkBackground({ color = "#ff0000" }: SilkBackgroundProps) {
   return (
     <div className="fixed inset-0 -z-10">
       <Silk
         speed={4}
         scale={0.75}
         noiseIntensity={10}
-        color="#1900ff"
+        color={color}
         rotation={75}
       />
     </div>
