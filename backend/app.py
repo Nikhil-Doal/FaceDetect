@@ -12,7 +12,6 @@ import base64
 import numpy as np
 from io import BytesIO
 from PIL import Image
-import insightface
 from insightface.app import FaceAnalysis
 
 load_dotenv()
@@ -45,18 +44,14 @@ except Exception as e:
     print(f"❌ MongoDB failed: {e}")
     exit(1)
 
-print("Initializing FaceAnalysis...")
+print("Initializing FaceAnalysis (CPU mode)...")
 try:
     face_app = FaceAnalysis(
         name='buffalo_l',
-        providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
+        providers=['CPUExecutionProvider']  # CPU only
     )
     face_app.prepare(ctx_id=0, det_size=(640, 640))
-    providers = face_app.det_model.session.get_providers()
-    if 'CUDAExecutionProvider' in providers:
-        print("✅ GPU enabled!")
-    else:
-        print("⚠️  CPU mode")
+    print("✅ FaceAnalysis ready (CPU mode)")
 except Exception as e:
     print(f"❌ FaceAnalysis failed: {e}")
     exit(1)
@@ -355,15 +350,14 @@ def delete_acquaintance(current_user, acquaintance_id):
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    gpu_available = 'CUDAExecutionProvider' in face_app.det_model.session.get_providers()
     return jsonify({
         'status': 'healthy',
-        'gpu_available': gpu_available,
+        'mode': 'CPU',
         'database': 'connected'
     }), 200
 
 if __name__ == '__main__':
-    print("\n🚀 FaceID Backend Server")
+    print("\n🚀 Backend Server (CPU Mode)")
     print(f"📍 http://localhost:5000")
     print("=" * 40)
     app.run(debug=True, host='0.0.0.0', port=5000)
