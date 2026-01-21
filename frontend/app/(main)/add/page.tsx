@@ -4,7 +4,6 @@ import { useState, useRef, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Silk from "@/components/Silk";
-import FluidGlass from "@/components/FluidGlass";
 import "./../../globals.css";
 
 export default function AddAcquaintance() {
@@ -19,11 +18,9 @@ export default function AddAcquaintance() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processFile = (file: File) => {
     if (!file.type.startsWith("image/")) {
       setError("Please select an image file");
       return;
@@ -42,6 +39,35 @@ export default function AddAcquaintance() {
       setError("");
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processFile(file);
+    }
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -118,17 +144,17 @@ export default function AddAcquaintance() {
   };
 
   return (
-    
     <div className="min-h-screen flex flex-col items-center justify-center p-10">
-        <div className="fixed inset-0 -z-10">
-            <Silk 
-            color="#ffffff"  // Your custom red color
-            scale={0.75}
-            speed={4}
-            noiseIntensity={20}
-            rotation={75}
-            />
-        </div>
+      <div className="fixed inset-0 -z-10">
+        <Silk 
+          color="#747474"
+          scale={0.75}
+          speed={4}
+          noiseIntensity={20}
+          rotation={75}
+        />
+      </div>
+      
       {/* Back button */}
       <Link
         href="/home"
@@ -140,23 +166,11 @@ export default function AddAcquaintance() {
       <h1 className="font-serif text-7xl mb-6 text-center tracking-tighter text-green-400">
         Add Person
       </h1>
+      
       <form
         onSubmit={handleSubmit}
-        className="glass w-1/3 p-6 flex flex-col gap-4 text-white rounded-2xl bg-white/10"
+        className="w-1/3 p-6 flex flex-col gap-4 text-white rounded-2xl bg-white/10 glass"
       >
-        <FluidGlass
-          mode="bar"
-          barProps={{
-            scale: 0.25,
-            ior: 2,
-            thickness: 3,
-            transmission: 1,
-            roughness: 0,
-            chromaticAberration: 0.1,
-            anisotropy: 0.01
-          }}
-        />
-
         {success && (
           <div className="bg-green-500/20 border border-green-500/50 rounded-full px-4 py-2 text-center">
             ✓ Person added successfully! Redirecting...
@@ -169,7 +183,7 @@ export default function AddAcquaintance() {
           </div>
         )}
 
-        {/* Image Upload */}
+        {/* Image Upload with Drag & Drop */}
         <div className="mt-4">
           {imagePreview ? (
             <div className="relative">
@@ -195,10 +209,21 @@ export default function AddAcquaintance() {
               </button>
             </div>
           ) : (
-            <label className="block w-full h-64 rounded-2xl border-2 border-dashed border-white/30 hover:border-white/50 bg-white/5 cursor-pointer transition-all">
+            <label
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`block w-full h-64 rounded-2xl border-2 border-dashed cursor-pointer transition-all ${
+                isDragging 
+                  ? 'border-green-400 bg-green-400/10 scale-[1.02]' 
+                  : 'border-white/30 hover:border-white/50 bg-white/5'
+              }`}
+            >
               <div className="flex flex-col items-center justify-center h-full">
                 <svg
-                  className="w-16 h-16 text-white/30 mb-3"
+                  className={`w-16 h-16 mb-3 transition-colors ${
+                    isDragging ? 'text-green-400' : 'text-white/30'
+                  }`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -210,7 +235,11 @@ export default function AddAcquaintance() {
                     d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
                   />
                 </svg>
-                <p className="text-white/60 text-sm mb-1">Click to upload photo</p>
+                <p className={`text-sm mb-1 transition-colors ${
+                  isDragging ? 'text-green-400 font-bold' : 'text-white/60'
+                }`}>
+                  {isDragging ? 'Drop image here!' : 'Drag & drop or click to upload'}
+                </p>
                 <p className="text-white/40 text-xs">PNG, JPG up to 5MB</p>
               </div>
               <input

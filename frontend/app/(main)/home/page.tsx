@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Silk from "@/components/Silk";
 
 interface Face {
   bbox: [number, number, number, number];
@@ -24,11 +25,11 @@ interface TrackedFace {
 const WIDTH = 640;
 const HEIGHT = 480;
 
-// Smoothing parameters - adjust these for different effects
-const SMOOTHING_FACTOR = 0.3; // Lower = smoother (0.1-0.5)
-const TRACKING_THRESHOLD = 80; // Distance to match same face
-const FACE_TIMEOUT = 1000; // Keep face for 1 second after lost
-const MIN_CONFIDENCE_CHANGE = 0.05; // Prevent constant name switching
+// Smoothing parameters
+const SMOOTHING_FACTOR = 0.3;
+const TRACKING_THRESHOLD = 80;
+const FACE_TIMEOUT = 1000;
+const MIN_CONFIDENCE_CHANGE = 0.05;
 
 export default function HomePage() {
   const router = useRouter();
@@ -238,7 +239,16 @@ export default function HomePage() {
   const unknownFaces = faces.filter((f) => f.name === "Unknown");
 
   return (
-    <div className="min-h-screen h-screen flex flex-col p-6 overflow-hidden">
+    <div className="min-h-screen flex flex-col p-6">
+      <div className="fixed inset-0 -z-10">
+        <Silk 
+          color="#747474"
+          scale={0.75}
+          speed={10}
+          noiseIntensity={20}
+          rotation={75}
+        />
+      </div>
       <nav className="flex justify-between items-center mb-6 flex-shrink-0">
         <div>
           <h1 className="font-serif text-4xl tracking-tight text-white">FaceID System</h1>
@@ -256,93 +266,107 @@ export default function HomePage() {
         </div>
       </nav>
 
-      <div className="flex gap-6 flex-1 min-h-0">
-        <div className="flex-1 relative min-h-0">
-          <div className="relative h-full rounded-2xl overflow-hidden border border-white/30 bg-black/50 backdrop-blur-sm">
-            <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-contain" />
-            <canvas ref={canvasRef} className="hidden" />
+      <div className="flex gap-6 flex-1 items-stretch">
+        {/* Video Container - Maximum height, maintain aspect ratio */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="relative h-full" style={{ aspectRatio: '4/3', maxHeight: '100%' }}>
+            <div className="relative w-full h-full rounded-2xl overflow-hidden border border-white/30 bg-black/50 backdrop-blur-sm">
+              <video 
+                ref={videoRef} 
+                autoPlay 
+                muted 
+                playsInline 
+                className="w-full h-full"
+                style={{ objectFit: 'cover' }}
+              />
+              <canvas ref={canvasRef} className="hidden" />
 
-            {isScanning && (
-              <div className="absolute top-4 left-4 flex items-center gap-2 bg-green-400/20 border border-green-400/50 rounded-full px-3 py-1">
-                <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                <span className="text-green-400 text-xs font-bold">SCANNING</span>
-              </div>
-            )}
+              {/* {isScanning && (
+                <div className="absolute top-4 left-4 flex items-center gap-2 bg-green-400/20 border border-green-400/50 rounded-full px-3 py-1">
+                  <span className="w-2 h-2 rounded-full bg-green-400" />
+                  <span className="text-green-400 text-xs font-bold">SCANNING</span>
+                </div>
+              )} */}
 
-            <div className="absolute inset-0">
-              {faces.map((f) => {
-                const [x1, y1, x2, y2] = f.smoothedBbox;
-                const color = getConfidenceColor(f.confidence);
-                const isKnown = f.name !== "Unknown";
-                const videoElement = videoRef.current;
-                if (!videoElement) return null;
+              {/* Bounding boxes overlay */}
+              <div className="absolute inset-0">
+                {faces.map((f) => {
+                  const [x1, y1, x2, y2] = f.smoothedBbox;
+                  const color = getConfidenceColor(f.confidence);
+                  const isKnown = f.name !== "Unknown";
+                  const videoElement = videoRef.current;
+                  if (!videoElement) return null;
 
-                const videoWidth = videoElement.offsetWidth;
-                const videoHeight = videoElement.offsetHeight;
-                const scaleX = videoWidth / WIDTH;
-                const scaleY = videoHeight / HEIGHT;
+                  // Simple direct mapping - backend sends 640x480 coords
+                  const containerWidth = videoElement.clientWidth;
+                  const containerHeight = videoElement.clientHeight;
+                  
+                  const scaleX = containerWidth / WIDTH;
+                  const scaleY = containerHeight / HEIGHT;
 
-                return (
-                  <div
-                    key={f.id}
-                    className="absolute pointer-events-none"
-                    style={{
-                      left: x1 * scaleX,
-                      top: y1 * scaleY,
-                      width: (x2 - x1) * scaleX,
-                      height: (y2 - y1) * scaleY,
-                      transition: 'all 0.15s ease-out',
-                    }}
-                  >
-                    <div className="absolute inset-0 rounded" style={{
-                      border: `3px solid ${color}`,
-                      boxShadow: `0 0 20px ${color}60, inset 0 0 20px ${color}20`,
-                    }} />
-                    <div className="absolute -top-1 -left-1 w-4 h-4" style={{ borderLeft: `3px solid ${color}`, borderTop: `3px solid ${color}` }} />
-                    <div className="absolute -top-1 -right-1 w-4 h-4" style={{ borderRight: `3px solid ${color}`, borderTop: `3px solid ${color}` }} />
-                    <div className="absolute -bottom-1 -left-1 w-4 h-4" style={{ borderLeft: `3px solid ${color}`, borderBottom: `3px solid ${color}` }} />
-                    <div className="absolute -bottom-1 -right-1 w-4 h-4" style={{ borderRight: `3px solid ${color}`, borderBottom: `3px solid ${color}` }} />
+                  return (
+                    <div
+                      key={f.id}
+                      className="absolute pointer-events-none"
+                      style={{
+                        left: `${x1 * scaleX}px`,
+                        top: `${y1 * scaleY}px`,
+                        width: `${(x2 - x1) * scaleX}px`,
+                        height: `${(y2 - y1) * scaleY}px`,
+                        transition: 'all 0.15s ease-out',
+                      }}
+                    >
+                      <div className="absolute inset-0 rounded" style={{
+                        border: `3px solid ${color}`,
+                        boxShadow: `0 0 20px ${color}60, inset 0 0 20px ${color}20`,
+                      }} />
+                      <div className="absolute -top-1 -left-1 w-4 h-4" style={{ borderLeft: `3px solid ${color}`, borderTop: `3px solid ${color}` }} />
+                      <div className="absolute -top-1 -right-1 w-4 h-4" style={{ borderRight: `3px solid ${color}`, borderTop: `3px solid ${color}` }} />
+                      <div className="absolute -bottom-1 -left-1 w-4 h-4" style={{ borderLeft: `3px solid ${color}`, borderBottom: `3px solid ${color}` }} />
+                      <div className="absolute -bottom-1 -right-1 w-4 h-4" style={{ borderRight: `3px solid ${color}`, borderBottom: `3px solid ${color}` }} />
 
-                    <div className="absolute -top-14 left-0 right-0 flex flex-col items-center gap-1">
-                      <div className="px-4 py-2 rounded-full text-sm font-bold tracking-wider whitespace-nowrap backdrop-blur-md" style={{
-                        backgroundColor: `${color}30`,
-                        border: `2px solid ${color}`,
-                        color: isKnown ? "#fff" : "#ff4757",
-                      }}>
-                        {isKnown ? (
-                          <span className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: color }} />
-                            {f.name.toUpperCase()}
-                            {f.relation && <span className="opacity-70">• {f.relation}</span>}
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                            UNKNOWN
-                          </span>
-                        )}
-                      </div>
-                      <div className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-black/70" style={{ color }}>
-                        {(f.confidence * 100).toFixed(1)}%
+                      <div className="absolute -top-14 left-0 right-0 flex flex-col items-center gap-1">
+                        <div className="px-4 py-2 rounded-full text-sm font-bold tracking-wider whitespace-nowrap backdrop-blur-md" style={{
+                          backgroundColor: `${color}30`,
+                          border: `2px solid ${color}`,
+                          color: isKnown ? "#fff" : "#ff4757",
+                        }}>
+                          {isKnown ? (
+                            <span className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                              {f.name.toUpperCase()}
+                              {f.relation && <span className="opacity-70">• {f.relation}</span>}
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-red-500" />
+                              UNKNOWN
+                            </span>
+                          )}
+                        </div>
+                        <div className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-black/70" style={{ color }}>
+                          {(f.confidence * 100).toFixed(1)}%
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
 
-            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
-              <div className="flex items-center justify-between text-xs text-white/60">
-                <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'} animate-pulse`} />
-                  <span className="font-mono">{isConnected ? "CONNECTED" : "DISCONNECTED"}</span>
+              <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
+                <div className="flex items-center justify-between text-xs text-white/60">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
+                    <span className="font-mono">{isConnected ? "CONNECTED" : "DISCONNECTED"}</span>
+                  </div>
+                  <span className="font-mono">TRACKING: {faces.length} • SMOOTH</span>
                 </div>
-                <span className="font-mono">TRACKING: {faces.length} • SMOOTH</span>
               </div>
             </div>
           </div>
         </div>
 
+        {/* Stats Panel */}
         <div className="w-80 glass rounded-2xl bg-white/10 border border-white/30 p-6 flex flex-col">
           <h2 className="text-white font-serif text-2xl mb-4">Detection Stats</h2>
           {lastScanTime && (
