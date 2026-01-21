@@ -1,6 +1,7 @@
 "use client";
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function Register() {
   const router = useRouter();
@@ -66,6 +67,17 @@ export default function Register() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-10">
+      {/* Back to Home Link */}
+      <Link
+        href="/"
+        className="absolute top-6 left-6 text-white/60 hover:text-white transition font-serif text-sm flex items-center gap-2"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+        </svg>
+        Back to Home
+      </Link>
+
       <h1 className="font-serif text-7xl mb-6 text-center tracking-tighter text-green-400">
         Register Page
       </h1>
@@ -131,10 +143,23 @@ export default function Register() {
         <button
           type="submit"
           disabled={loading}
-          className="rounded-full bg-white text-black px-6 py-2 font-medium font-serif text-xl mt-4 mb-4 hover:bg-white/0 hover:text-white border border-white/30 hover:border-white transition-all duration-1000 disabled:opacity-50"
+          className="rounded-full bg-white text-black px-6 py-2 font-medium font-serif text-xl mt-4 hover:bg-white/0 hover:text-white border border-white/30 hover:border-white transition-all duration-1000 disabled:opacity-50"
         >
           {loading ? "Registering..." : "Register"}
         </button>
+
+        {/* Login Link */}
+        <div className="text-center mt-4 pb-2">
+          <p className="text-white/60 text-sm">
+            Already have an account?{" "}
+            <Link
+              href="/login"
+              className="text-green-400 hover:text-green-300 transition font-medium"
+            >
+              Login here
+            </Link>
+          </p>
+        </div>
       </form>
     </div>
   );

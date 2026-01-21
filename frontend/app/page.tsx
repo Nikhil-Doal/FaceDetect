@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import LetterGlitchBackground from "@/components/backgrounds/LetterGlitchBackground";
+import LetterGlitch from "@/components/LetterGlitch";
 
 export default function Home() {
   return (
     <div className="relative min-h-screen overflow-hidden">
       {/* Background */}
       <div className="absolute inset-0 -z-10">
-        <LetterGlitchBackground />
+        <LetterGlitch 
+          glitchColors={['#2c2c2c', '#00ff22b2', '#446469']}
+          outerVignette={false}
+          centerVignette={true} />
       </div>
 
       {/* Top Bar */}

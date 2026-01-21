@@ -1,6 +1,7 @@
 "use client";
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function Login() {
   const router = useRouter();
@@ -57,6 +58,17 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-10">
+      {/* Back to Home Link */}
+      <Link
+        href="/"
+        className="absolute top-6 left-6 text-white/60 hover:text-white transition font-serif text-sm flex items-center gap-2"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+        </svg>
+        Back to Home
+      </Link>
+
       <h1 className="font-serif text-7xl mb-6 text-center tracking-tighter text-green-400">
         Login Page
       </h1>
@@ -102,6 +114,19 @@ export default function Login() {
         >
           {loading ? "Logging in..." : "Login"}
         </button>
+
+        {/* Register Link */}
+        <div className="text-center mt-4 pb-2">
+          <p className="text-white/60 text-sm">
+            Don't have an account?{" "}
+            <Link
+              href="/register"
+              className="text-green-400 hover:text-green-300 transition font-medium"
+            >
+              Register here
+            </Link>
+          </p>
+        </div>
       </form>
     </div>
   );

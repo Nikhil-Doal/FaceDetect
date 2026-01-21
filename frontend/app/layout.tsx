@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Instrument_Serif } from "next/font/google";
-import SilkBackground from "@/components/backgrounds/SilkBackground";
 import "./globals.css";
 
 const instrumentSerif = Instrument_Serif({
@@ -36,7 +35,6 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} antialiased`}
       >
-        <SilkBackground color="#9f0000"></SilkBackground>
         {children}
       </body>
     </html>
