@@ -19,6 +19,9 @@ export default function AddAcquaintance() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const processFile = (file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -39,6 +42,56 @@ export default function AddAcquaintance() {
       setError("");
     };
     reader.readAsDataURL(file);
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: 'user', 
+          width: { ideal: 640 }, 
+          height: { ideal: 480 } 
+        } 
+      });
+      streamRef.current = stream;
+      setShowCamera(true);
+      setError("");
+      
+      // Wait for next tick to ensure video element is rendered
+      setTimeout(() => {
+        if (videoRef.current && streamRef.current) {
+          videoRef.current.srcObject = streamRef.current;
+        }
+      }, 100);
+    } catch (err) {
+      setError("Camera access denied");
+      console.error("Camera error:", err);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setShowCamera(false);
+  };
+
+  const capturePhoto = () => {
+    if (!videoRef.current) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 480;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.drawImage(videoRef.current, 0, 0, 640, 480);
+    const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    
+    setImagePreview(imageDataUrl);
+    setImageData(imageDataUrl);
+    stopCamera();
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -183,9 +236,40 @@ export default function AddAcquaintance() {
           </div>
         )}
 
-        {/* Image Upload with Drag & Drop */}
+        {/* Image Upload with Drag & Drop + Camera */}
         <div className="mt-4">
-          {imagePreview ? (
+          {showCamera ? (
+            <div className="relative">
+              <div className="relative w-full h-64 rounded-2xl overflow-hidden border border-white/30 bg-black">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="w-full h-full object-cover"
+                  onLoadedMetadata={() => {
+                    console.log("Camera loaded");
+                  }}
+                />
+              </div>
+              <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={capturePhoto}
+                  className="px-6 py-2 bg-green-400 hover:bg-green-500 text-black rounded-full font-bold transition-all"
+                >
+                  📸 Capture
+                </button>
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="px-6 py-2 bg-red-500/80 hover:bg-red-500 text-white rounded-full font-bold transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : imagePreview ? (
             <div className="relative">
               <div className="relative w-full h-64 rounded-2xl overflow-hidden border border-white/30">
                 <img
@@ -209,47 +293,67 @@ export default function AddAcquaintance() {
               </button>
             </div>
           ) : (
-            <label
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              className={`block w-full h-64 rounded-2xl border-2 border-dashed cursor-pointer transition-all ${
-                isDragging 
-                  ? 'border-green-400 bg-green-400/10 scale-[1.02]' 
-                  : 'border-white/30 hover:border-white/50 bg-white/5'
-              }`}
-            >
-              <div className="flex flex-col items-center justify-center h-full">
-                <svg
-                  className={`w-16 h-16 mb-3 transition-colors ${
-                    isDragging ? 'text-green-400' : 'text-white/30'
-                  }`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                  />
-                </svg>
-                <p className={`text-sm mb-1 transition-colors ${
-                  isDragging ? 'text-green-400 font-bold' : 'text-white/60'
-                }`}>
-                  {isDragging ? 'Drop image here!' : 'Drag & drop or click to upload'}
-                </p>
-                <p className="text-white/40 text-xs">PNG, JPG up to 5MB</p>
+            <div className="space-y-3">
+              <label
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`block w-full h-64 rounded-2xl border-2 border-dashed cursor-pointer transition-all ${
+                  isDragging 
+                    ? 'border-green-400 bg-green-400/10 scale-[1.02]' 
+                    : 'border-white/30 hover:border-white/50 bg-white/5'
+                }`}
+              >
+                <div className="flex flex-col items-center justify-center h-full">
+                  <svg
+                    className={`w-16 h-16 mb-3 transition-colors ${
+                      isDragging ? 'text-green-400' : 'text-white/30'
+                    }`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                    />
+                  </svg>
+                  <p className={`text-sm mb-1 transition-colors ${
+                    isDragging ? 'text-green-400 font-bold' : 'text-white/60'
+                  }`}>
+                    {isDragging ? 'Drop image here!' : 'Drag & drop or click to upload'}
+                  </p>
+                  <p className="text-white/40 text-xs">PNG, JPG up to 5MB</p>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageChange}
+                  className="hidden"
+                />
+              </label>
+              
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-px bg-white/20" />
+                <span className="text-white/40 text-xs">OR</span>
+                <div className="flex-1 h-px bg-white/20" />
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleImageChange}
-                className="hidden"
-              />
-            </label>
+
+              <button
+                type="button"
+                onClick={startCamera}
+                className="w-full py-3 rounded-full bg-white/10 border border-white/30 text-white font-serif text-lg hover:bg-white/20 transition-all flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Take Photo with Camera
+              </button>
+            </div>
           )}
         </div>
 
