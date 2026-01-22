@@ -17,7 +17,7 @@ export default function Home() {
       {/* Top Bar */}
       <header className="flex justify-between items-center px-10 py-6">
         <h1 className="font-serif text-3xl tracking-tight text-white">
-          FaceID
+          FaceDetect
         </h1>
 
         <div className="flex gap-4">

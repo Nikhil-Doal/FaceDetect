@@ -31,6 +31,13 @@ const TRACKING_THRESHOLD = 80;
 const FACE_TIMEOUT = 1000;
 const MIN_CONFIDENCE_CHANGE = 0.05;
 
+function toTitleCase(str: string): string {
+  return str
+    .split(" ")
+    .map(w => w ? w[0].toUpperCase() + w.slice(1) : "")
+    .join(" ");
+}
+
 export default function HomePage() {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -251,9 +258,9 @@ export default function HomePage() {
       </div>
       <nav className="flex justify-between items-center mb-6 flex-shrink-0">
         <div>
-          <h1 className="font-serif text-4xl tracking-tight text-white">FaceID System</h1>
-          <p className="text-white/60 text-sm mt-1">
-            Welcome, <span className="text-green-400">{username}</span>
+          <h1 className="font-serif text-4xl tracking-tight text-white">FaceDetect System</h1>
+          <p className="text-white/60 text-lg mt-1">
+            Welcome, <span className="text-green-400">{toTitleCase(username)}</span>
           </p>
         </div>
         <div className="flex gap-4">
